@@ -4,17 +4,14 @@ import traceback
 from datetime import datetime
 import pytz
 import uuid
-
 import json
 import random
 import re
 import time
 import os
-
 from util.aes_help import encrypt_data, decrypt_data
 import util.zepp_helper as zeppHelper
 import util.push_util as push_util
-
 try:
     from dotenv import load_dotenv
     load_dotenv(override=True)
@@ -26,24 +23,10 @@ def get_int_value_default(_config: dict, _key, default):
     _config.setdefault(_key, default)
     return int(_config.get(_key))
 
-
-# 获取当前时间对应的最大和最小步数
-def get_min_max_by_time(hour=None, minute=None):
-    if hour is None:
-        hour = time_bj.hour
-    if minute is None:
-        minute = time_bj.minute
-    time_rate = min((hour * 60 + minute) / (22 * 60), 1)
-    min_step = get_int_value_default(config, 'MIN_STEP', 18000)
-    max_step = get_int_value_default(config, 'MAX_STEP', 25000)
-    return int(time_rate * min_step), int(time_rate * max_step)
-
-
 # 虚拟ip地址
 def fake_ip():
     # 随便找的国内IP段：223.64.0.0 - 223.117.255.255
     return f"{223}.{random.randint(64, 117)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
-
 
 # 账号脱敏
 def desensitize_user_name(user):
@@ -52,24 +35,20 @@ def desensitize_user_name(user):
         return f'{user[:ln]}***{user[-ln:]}'
     return f'{user[:3]}****{user[-4:]}'
 
-
 # 获取北京时间
 def get_beijing_time():
     target_timezone = pytz.timezone('Asia/Shanghai')
     # 获取当前时间
     return datetime.now().astimezone(target_timezone)
 
-
 # 格式化时间
 def format_now():
     return get_beijing_time().strftime("%Y-%m-%d %H:%M:%S")
-
 
 # 获取时间戳
 def get_time():
     current_time = get_beijing_time()
     return "%.0f" % (current_time.timestamp() * 1000)
-
 
 # 获取登录code
 def get_access_token(location):
@@ -79,14 +58,12 @@ def get_access_token(location):
         return None
     return result[0]
 
-
 def get_error_code(location):
     code_pattern = re.compile("(?<=error=).*?(?=&)")
     result = code_pattern.findall(location)
     if result is None or len(result) == 0:
         return None
     return result[0]
-
 
 class MiMotionRunner:
     def __init__(self, _user, _passwd):
@@ -110,8 +87,6 @@ class MiMotionRunner:
         else:
             self.is_phone = False
         self.user = user
-        # self.fake_ip_addr = fake_ip()
-        # self.log_str += f"创建虚拟ip地址：{self.fake_ip_addr}\n"
 
     # 登录
     def login(self):
@@ -152,19 +127,16 @@ class MiMotionRunner:
                     user_token_info["app_token"] = app_token
                     user_token_info["app_token_time"] = get_time()
                     return app_token
-
         # access_token 失效 或者没有保存加密数据
         access_token, msg = zeppHelper.login_access_token(self.user, self.password)
         if access_token is None:
             self.log_str += "登录获取accessToken失败：%s" % msg
             return None
-        # print(f"device_id:{self.device_id} isPhone: {self.is_phone}")
         login_token, app_token, user_id, msg = zeppHelper.grant_login_tokens(access_token, self.device_id,
                                                                              self.is_phone)
         if login_token is None:
             self.log_str += f"登录提取的 access_token 无效：{msg}"
             return None
-
         user_token_info = dict()
         user_token_info["access_token"] = access_token
         user_token_info["login_token"] = login_token
@@ -180,17 +152,16 @@ class MiMotionRunner:
         user_tokens[self.user] = user_token_info
         return app_token
 
-    # 主函数
-    def login_and_post_step(self, min_step, max_step):
+    # 主函数：使用固定步数，不再随机
+    def login_and_post_step(self, fix_step):
         if self.invalid:
             return "账号或密码配置有误", False
         app_token = self.login()
         if app_token is None:
             return "登陆失败！", False
+        step = str(fix_step)
+        self.log_str += f"已设置固定步数:{step}\n"
 
-        step = str(random.randint(min_step, max_step))
-        self.log_str += f"已设置为随机步数范围({min_step}~{max_step}) 随机值:{step}\n"
-        
         user_token_info = user_tokens.get(self.user, {})
         bound_device_id = user_token_info.get("bound_device_id")
         if not bound_device_id and self.user_id:
@@ -199,33 +170,29 @@ class MiMotionRunner:
                 user_token_info["bound_device_id"] = bound_device_id
                 user_tokens[self.user] = user_token_info
                 self.log_str += f"查找到已绑定设备ID: {bound_device_id}\n"
-
         ok, msg = zeppHelper.post_fake_brand_data(step, app_token, self.user_id, device_id=bound_device_id)
         return f"修改步数（{step}）[" + msg + "]", ok
 
-
-def run_single_account(total, idx, user_mi, passwd_mi):
+def run_single_account(total, idx, user_mi, passwd_mi, fix_step):
     idx_info = ""
     if idx is not None:
         idx_info = f"[{idx + 1}/{total}]"
     log_str = f"[{format_now()}]\n{idx_info}账号：{desensitize_user_name(user_mi)}\n"
     try:
         runner = MiMotionRunner(user_mi, passwd_mi)
-        exec_msg, success = runner.login_and_post_step(min_step, max_step)
+        exec_msg, success = runner.login_and_post_step(fix_step)
         log_str += runner.log_str
         log_str += f'{exec_msg}\n'
         exec_result = {"user": user_mi, "success": success,
                        "msg": exec_msg}
     except:
         log_str += f"执行异常:{traceback.format_exc()}\n"
-        log_str += traceback.format_exc()
         exec_result = {"user": user_mi, "success": False,
                        "msg": f"执行异常:{traceback.format_exc()}"}
     print(log_str)
     return exec_result
 
-
-def execute():
+def execute(fix_step):
     user_list = users.split('#')
     passwd_list = passwords.split('#')
     exec_results = []
@@ -234,11 +201,11 @@ def execute():
         if use_concurrent:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                exec_results = executor.map(lambda x: run_single_account(total, x[0], *x[1]),
+                exec_results = executor.map(lambda x: run_single_account(total, x[0], *x[1], fix_step),
                                             enumerate(zip(user_list, passwd_list)))
         else:
             for user_mi, passwd_mi in zip(user_list, passwd_list):
-                exec_results.append(run_single_account(total, idx, user_mi, passwd_mi))
+                exec_results.append(run_single_account(total, idx, user_mi, passwd_mi, fix_step))
                 idx += 1
                 if idx < total:
                     # 每个账号之间间隔一定时间请求一次，避免接口请求过于频繁导致异常
@@ -258,7 +225,6 @@ def execute():
         print(f"账号数长度[{len(user_list)}]和密码数长度[{len(passwd_list)}]不匹配，跳过执行")
         exit(1)
 
-
 def prepare_user_tokens() -> dict:
     data_path = r"encrypted_tokens.data"
     if os.path.exists(data_path):
@@ -274,7 +240,6 @@ def prepare_user_tokens() -> dict:
     else:
         return dict()
 
-
 def persist_user_tokens():
     data_path = r"encrypted_tokens.data"
     origin_str = json.dumps(user_tokens, ensure_ascii=False)
@@ -283,7 +248,6 @@ def persist_user_tokens():
         f.write(cipher_data)
         f.flush()
         f.close()
-
 
 if __name__ == "__main__":
     # 北京时间
@@ -312,8 +276,7 @@ if __name__ == "__main__":
         config = {
             "USER": os.environ.get("USER"),
             "PWD": os.environ.get("PWD"),
-            "MIN_STEP": os.environ.get("MIN_STEP", "18000"),
-            "MAX_STEP": os.environ.get("MAX_STEP", "25000"),
+            "FIX_STEP": os.environ.get("FIX_STEP", "20000"),
             "PUSH_PLUS_TOKEN": os.environ.get("PUSH_PLUS_TOKEN", ""),
             "PUSH_PLUS_HOUR": os.environ.get("PUSH_PLUS_HOUR", ""),
             "PUSH_PLUS_MAX": os.environ.get("PUSH_PLUS_MAX", "30"),
@@ -346,7 +309,10 @@ if __name__ == "__main__":
     if users is None or passwords is None:
         print("未正确配置账号密码，无法执行")
         exit(1)
-    min_step, max_step = get_min_max_by_time()
+
+    # ========== 使用固定步数 ==========
+    fix_step = get_int_value_default(config, "FIX_STEP", 20000)
+
     use_concurrent = config.get('USE_CONCURRENT')
     if use_concurrent is not None and use_concurrent == 'True':
         use_concurrent = True
@@ -354,4 +320,5 @@ if __name__ == "__main__":
         print(f"多账号执行间隔：{sleep_seconds}")
         use_concurrent = False
     # endregion
-    execute()
+
+    execute(fix_step)
