@@ -1,9 +1,20 @@
 name: 刷步数
 
 on:
-  # schedule:
-    # - cron: '33 '38 * * *'
   workflow_dispatch:
+    inputs:
+      USER:
+        description: Zepp账号
+        required: true
+        type: string
+      PWD:
+        description: 账号密码
+        required: true
+        type: string
+      FIX_STEP:
+        description: 固定步数
+        required: true
+        type: number
 
 jobs:
   build:
@@ -13,22 +24,25 @@ jobs:
       - name: Checkout codes
         uses: actions/checkout@v5
         with:
-          token: ${{ secrets.PAT }} #此处PAT需要申请，教程详见：README
-      - name: Update system and install zsh
-        run: |
-          sudo -E apt-get -qq update
-          sudo -E apt-get install zsh -y
-          
+          token: ${{ secrets.PAT }}
+
       - name: 初始化Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.10"
-          
+
       - name: 开始
         env:
-            CONFIG: ${{ secrets.CONFIG }}
+            # 优先使用网页传入的参数
+            CONFIG: >-
+              {
+                "USER":"${{ github.event.inputs.USER }}",
+                "PWD":"${{ github.event.inputs.PWD }}",
+                "FIX_STEP":${{ github.event.inputs.FIX_STEP }},
+                "SLEEP_GAP":"5",
+                "USE_CONCURRENT":"False"
+              }
             AES_KEY: ${{ secrets.AES_KEY }}
-            
         run: |
           pip3 install -r requirements.txt
           python3 main.py
